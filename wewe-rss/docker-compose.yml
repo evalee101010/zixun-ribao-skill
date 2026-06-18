@@ -1,0 +1,23 @@
+# WeWe RSS —— 把微信公众号转成 RSS（基于微信读书），喂给日报管道
+# 起停：在本目录执行  docker compose up -d   /   docker compose down
+# 起来后打开 http://localhost:4000 ，用下面的 AUTH_CODE 登录后台
+services:
+  wewe-rss:
+    image: cooderl/wewe-rss-sqlite:latest      # SQLite 单容器，最省事（试用够用）
+    container_name: wewe-rss
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      - DATABASE_TYPE=sqlite
+      - AUTH_CODE=ribao-2026                # 后台登录口令；/feeds 取RSS不需要它
+      - FEED_MODE=fulltext                    # 输出全文，日报浓缩才有料
+      - SERVER_ORIGIN_URL=http://localhost:4000
+      - CRON_EXPRESSION=35 5,15 * * *         # 每天5:35和15:35刷新（15:35 在日报16:05前抢一次新）
+      - UPDATE_DELAY_TIME=60s                 # 连续更新间隔，降低被封控概率
+      - TZ=Asia/Shanghai
+    volumes:
+      - wewe-rss-data:/app/data        # 用命名卷，避免 macOS Documents 目录挂载/权限问题
+
+volumes:
+  wewe-rss-data:

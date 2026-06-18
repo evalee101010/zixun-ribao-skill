@@ -1,0 +1,22 @@
+# Local secrets
+.env
+
+# Runtime outputs
+资讯日报-草稿-*.md
+资讯日报-质检-*.md
+资讯类简报-*.md
+run.log
+launchd.out.log
+launchd.err.log
+.undated_seen_urls.json
+
+# Python/cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/
+

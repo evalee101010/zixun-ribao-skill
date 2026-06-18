@@ -1,0 +1,320 @@
+# ============================================================
+# 出海泛娱乐 资讯日报 · 源注册表（启动清单）
+# ------------------------------------------------------------
+# 用法：脚本读取本文件，按 enabled: true 的源逐个抓取北京时间前一日16:00—当日16:00内容。
+# rsshub_base：你的 RSSHub 实例地址（自建后改成自己的；暂用公开实例）。
+#   公开实例可能限速/不稳，仅用于第一阶段跑通。自建后改为 http://localhost:1200
+# type 说明：
+#   rss     —— 标准 RSS / RSSHub 路由，脚本自动抓
+#   wechat  —— 微信公众号，无官方API；自建 WeWe RSS 后可转 rss，否则人工贴链接
+#   web     —— 无 RSS 的网页/榜单，需定期人工看或后续写专抓
+#   api     —— 走专有 API（如点点数据），预留接入位
+# board：一级板块  /  track：二级赛道（对齐《格式规范》）
+# ============================================================
+
+config:
+  rsshub_base: "https://rsshub.app"        # ← 自建后改这里
+  # 时间窗：默认按北京时间 昨16:00—今16:00 滚动窗口（脚本自动算，无需配）；--date 可指定历史日期测试
+  select:
+    per_track_top: 7      # 每赛道精选上限
+    total_cap: 30         # 建议整篇成稿条数上限（agent 控篇幅用）
+  dedup: true             # 去重：链接精确 + 跨源标题近重复
+
+# ============================================================
+# 分层策略（资源效率最优）：
+#   Tier 1 主力聚合源：已替你浓缩好的成品 feed，一个顶一片，自动抓，近零人工。
+#   Tier 2 垂直补充源：补 Tier1 覆盖不到的"出海泛娱乐业务/数据"面，RSS 自动 + 公众号人工。
+#   Tier 3 选题池（不在本文件）：即刻/X/领英/播客/Newsletter 等大列表，见《信息渠道汇总.md》，
+#          噪声大且多需登录，仅作人工选题与深挖，不做每日自动抓。
+# ============================================================
+sources:
+  # ============ Tier 1 主力聚合源 ============
+  - name: AI工具集-每日AI资讯
+    tier: 1
+    board: 创新·AI娱乐
+    track: AI模型与应用（娱乐向）
+    type: aibot
+    url: "https://ai-bot.cn/daily-ai-news/"
+    note: "每条已是 标题+浓缩+来源 成品，覆盖AI模型/应用/AI娱乐/融资；脚本自动按标题分流到三大板块"
+    enabled: true
+
+  - name: IT之家
+    tier: 1
+    board: 创新·AI娱乐
+    track: AI模型与应用（娱乐向）
+    type: rss
+    url: "https://www.ithome.com/rss/"
+    autoclassify: true
+    fetch_images: true        # 抓原文产品截图作候选图（img.ithome.com，可热链）
+    image_limit: 12
+    note: "✅ 60条/带完整正文/带时间戳，产品粒度细（单个产品发布/更新），补'具体产品'维度；按标题自动分流"
+    enabled: true
+
+  - name: 36氪
+    tier: 1
+    board: 创新·AI娱乐
+    track: AI模型与应用（娱乐向）
+    type: rss
+    url: "https://36kr.com/feed"
+    autoclassify: true
+    note: "✅ 原生feed带完整正文(数千字深度文)+时间戳，补'观点/解读'维度；按标题自动分流。注意是综合源，靠关键词降噪"
+    enabled: true
+
+  - name: ProductHunt
+    tier: 1
+    board: 创新·AI娱乐
+    track: AI模型与应用（娱乐向）
+    type: rss
+    url: "https://www.producthunt.com/feed"
+    autoclassify: true
+    note: "✅ 每条=一个新产品，最适合'具体产品'维度；英文、偏SaaS噪声较大，靠关键词过滤"
+    enabled: true
+
+  - name: 量子位
+    tier: 2
+    board: 创新·AI娱乐
+    track: AI模型与应用（娱乐向）
+    type: rss
+    url: "https://www.qbitai.com/feed"
+    autoclassify: true
+    note: "AI产品/模型，标题级（feed无正文），作补充；正文需点链接"
+    enabled: true
+
+  - name: 微信公众号(WeWe RSS)
+    tier: 1
+    board: 创新·AI娱乐
+    track: AI模型与应用（娱乐向）
+    type: rss
+    url: "http://localhost:4000/feeds/all.rss"   # 部署 wewe-rss/ 后改成你的地址；一个 all 源收下所有已订阅公众号
+    autoclassify: true
+    note: "WeWe RSS 把公众号转 RSS（见 wewe-rss/README.md）；当前已订阅：白鲸出海、Z Potentials、短剧自习室、DataEye短剧出海。一个 all 源全收、按标题自动分流。想加公众号在 WeWe 后台订阅即可（约10个/账号上限）"
+    enabled: true         # WeWe RSS 已部署并订阅公众号
+
+  # ============ Tier 2 垂直补充源 ============
+  # —— 游戏（媒体/RSS）——
+  - name: 触乐
+    board: 泛娱乐·出海
+    track: 休闲游戏
+    type: rss
+    route: "/touchgame"          # 触乐网，RSSHub 路由
+    enabled: true
+  - name: GameLook
+    board: 泛娱乐·出海
+    track: 休闲游戏
+    type: web
+    url: "https://www.gamelook.com.cn/feed"
+    enabled: true
+  - name: PocketGamer.biz
+    board: 泛娱乐·出海
+    track: 休闲游戏
+    type: web
+    url: "https://www.pocketgamer.biz/rss/"
+    enabled: true
+
+  # —— 游戏 / 出海（公众号，需 WeWe RSS 或人工）——
+  - name: 游戏葡萄
+    board: 泛娱乐·出海
+    track: 休闲游戏
+    type: wechat
+    note: "出海与产品深度，重点源"
+    enabled: true
+  - name: 游戏陀螺
+    board: 泛娱乐·出海
+    track: 休闲游戏
+    type: wechat
+    enabled: true
+  - name: 白鲸出海
+    tier: 2
+    board: 泛娱乐·出海
+    track: 其他
+    type: listpage
+    url: "https://www.baijingapp.com"
+    pages: ["/newsflashes"]
+    link_pattern: '/article/\d+'
+    fetch_body: true          # 正文在静态 <p> 里，脚本自动取全文（公司名/背景/数据都在正文）
+    body_limit: 14
+    note: "✅ 快讯页列表解析 + 自动取正文（/article 静态<p>）；注意 /feed 是陈旧问答子站别用。出海综合重点源"
+    enabled: true
+  - name: 36氪出海
+    tier: 2
+    board: 泛娱乐·出海
+    track: 其他
+    type: listpage
+    url: "https://letschuhai.com"
+    pages: ["/", "/industry/mobile-games"]
+    link_pattern: '/[0-9a-f]{6,}'
+    fetch_body: true          # 正文在 __NEXT_DATA__ 的 content.rendered，脚本自动取全文
+    body_limit: 12
+    note: "✅ 列表解析 + 自动取正文（Next.js __NEXT_DATA__）。出海游戏/泛娱乐/深度分析重点源"
+    enabled: true
+  - name: 扬帆出海
+    board: 泛娱乐·出海
+    track: 其他
+    type: wechat
+    enabled: true
+
+  # —— 短剧 ——
+  - name: DataEye短剧观察
+    board: 泛娱乐·出海
+    track: 短剧/漫剧
+    type: wechat
+    note: "已由 WeWe RSS 覆盖（订阅了 DataEye短剧出海）；如需官网榜单数据另说"
+    enabled: false
+  - name: 短剧自习室
+    board: 泛娱乐·出海
+    track: 短剧/漫剧
+    type: wechat
+    note: "已由 WeWe RSS 覆盖（已在 WeWe 订阅）"
+    enabled: false
+
+  # —— 小说·网文 ——
+  - name: 网文情报局
+    board: 泛娱乐·出海
+    track: 小说·网文
+    type: wechat
+    enabled: false
+
+  # —— 社交·Dating ——
+  - name: 社交产品笔记
+    board: 泛娱乐·出海
+    track: 社交·Dating
+    type: wechat
+    enabled: false
+
+  # ------------------------------------------------------------
+  # 板块二：创新·AI娱乐
+  # ------------------------------------------------------------
+  - name: 量子位
+    board: 创新·AI娱乐
+    track: AI模型与应用（娱乐向）
+    type: wechat
+    note: "与上方 RSS 版量子位重复，关闭；如需公众号版可在 WeWe 订阅"
+    enabled: false
+  - name: 机器之心
+    board: 创新·AI娱乐
+    track: AI模型与应用（娱乐向）
+    type: wechat
+    enabled: true
+  - name: Founder Park
+    board: 创新·AI娱乐
+    track: AI模型与应用（娱乐向）
+    type: wechat
+    note: "AI 产品/创业"
+    enabled: true
+  - name: TechCrunch-AI
+    board: 创新·AI娱乐
+    track: AI模型与应用（娱乐向）
+    type: web
+    url: "https://techcrunch.com/category/artificial-intelligence/feed/"
+    enabled: true
+  - name: 36氪-快讯
+    board: 创新·AI娱乐
+    track: AI模型与应用（娱乐向）
+    type: rss
+    route: "/36kr/newsflashes"
+    enabled: true
+  - name: 量子位-硬件智能
+    board: 创新·AI娱乐
+    track: 创新硬件（娱乐向）
+    type: wechat
+    enabled: false
+
+  # ------------------------------------------------------------
+  # 板块三：全球融资
+  # ------------------------------------------------------------
+  - name: IT桔子
+    board: 全球融资
+    track: 泛AI·AI应用融资
+    type: web
+    url: "https://www.itjuzi.com/"
+    note: "国内融资库，需登录看全量；列表页可抓"
+    enabled: true
+  - name: 36氪-融资
+    board: 全球融资
+    track: 泛娱乐融资
+    type: rss
+    route: "/36kr/search/articles/融资"
+    enabled: true
+  - name: TechCrunch-Funding
+    board: 全球融资
+    track: 泛AI·AI应用融资
+    type: web
+    url: "https://techcrunch.com/category/venture/feed/"
+    enabled: true
+  - name: StartupHub-AI
+    board: 全球融资
+    track: 泛AI·AI应用融资
+    type: web
+    url: "https://www.startuphub.ai/feed/"
+    note: "海外 AI 创业/融资，有免费 API/MCP"
+    enabled: true
+
+  # ------------------------------------------------------------
+  # 数据站（榜单/数据披露，多为 web 或 api）
+  # ------------------------------------------------------------
+  - name: 点点数据
+    board: 泛娱乐·出海
+    track: 休闲游戏
+    type: api
+    api_slot: "DIANDIAN_API"     # ← 点点 API 上线后在 .env 填 key，脚本读取
+    note: "出海 App 下载/收入榜，预留 API 接入位"
+    enabled: false
+  - name: Sensor Tower 博客
+    board: 泛娱乐·出海
+    track: 其他
+    type: web
+    url: "https://sensortower.com/blog/rss"
+    enabled: true
+  - name: 快出海-报告
+    board: 泛娱乐·出海
+    track: 其他
+    type: web
+    url: "https://www.kchuhai.com/"
+    note: "出海数据报告聚合，定期人工看"
+    enabled: false
+
+# ============================================================
+# 关键词过滤：标题/正文命中任一关键词才纳入（降噪）
+# 想更宽松就清空 include。exclude 命中则剔除。
+# ============================================================
+keywords:
+  include:
+    - 出海
+    - 游戏
+    - 短剧
+    - 漫剧
+    - 网文
+    - 社交
+    - dating
+    - AI
+    - 大模型
+    - 融资
+    - 估值
+    - 财报
+    - 下载
+    - 流水
+    - DAU
+    - MAU
+    - IPO
+  exclude:
+    - 招聘
+    - 课程报名
+    - 直播预告
+    # —— 具身/机器人方向：现阶段先不看 ——
+    - 具身
+    - 人形
+    - 机械臂
+    - 机器狗
+    - 四足
+    - 双足
+    - 灵巧手
+    - 仿生
+    - 宇树
+    - 智元
+    - 机器人
+  # 保护词：含这些短语时不因"机器人"被误杀（其实是AI助手/对话产品）
+  exclude_protect:
+    - 聊天机器人
+    - 对话机器人
+    - 客服机器人
+    - 机器人流程
