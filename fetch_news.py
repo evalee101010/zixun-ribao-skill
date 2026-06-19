@@ -232,7 +232,7 @@ def score(it):
     s = 0
     if any(k in t for k in ("出海", "海外", "全球")):
         s += 3
-    if any(k in t for k in ("融资", "估值", "ipo", "轮")):
+    if is_funding_event(t):
         s += 3
     s += 2 * min(2, sum(1 for k in HOT if k in t))
     s += min(4, sum(1 for k in DATA_SIG if k in t))
@@ -251,6 +251,41 @@ def hit_keywords(text, include, exclude, protect=()):
     if not include:
         return True
     return any(x.lower() in t for x in include)
+
+
+PERSONAL_LIFESTYLE_PATTERNS = [
+    r"(创始人|ceo|老板|高管|富豪|个人|私人).{0,30}(购入|买下|斥资|购买).{0,30}(豪宅|别墅|游艇|私人飞机|豪车|房产)",
+    r"(豪宅|别墅|游艇|私人飞机|豪车|房产).{0,30}(创始人|ceo|老板|高管|富豪|个人|私人)",
+    r"(私人码头|船只升降机|海滨豪宅|超级游艇)",
+]
+
+LOW_INFO_TITLE_ONLY_PATTERNS = [
+    r"(等)?\d+家(企业|公司).{0,20}(加码|布局|发力|大动作|提速)",
+    r"(加码|布局|发力|大动作|提速).{0,20}(出海|短剧|游戏|ai).{0,20}(企业|公司)",
+]
+
+TITLE_ONLY_HARD_FACT_PATTERNS = [
+    r"(收入|营收|流水|分成|下载|用户|mau|dau|估值|融资|募资|ipo|上市)",
+    r"(\$|美元|万美元|亿元|亿美元|万|亿|%)",
+    r"(登顶|榜首|top\s?\d+|第\d+)",
+]
+
+
+def is_personal_lifestyle_noise(text):
+    """剔除名人个人消费/资产新闻；除非和公司经营、产品或资本动作直接相关。"""
+    t = (text or "").lower()
+    return any(re.search(p, t, flags=re.I) for p in PERSONAL_LIFESTYLE_PATTERNS)
+
+
+def is_low_info_title_only(title, summary):
+    """剔除只有标题、且仅表达“加码/布局/大动作”的弱信号。"""
+    title = title or ""
+    summary = summary or ""
+    if len(summary.strip()) >= 15:
+        return False
+    if not any(re.search(p, title, flags=re.I) for p in LOW_INFO_TITLE_ONLY_PATTERNS):
+        return False
+    return not any(re.search(p, title, flags=re.I) for p in TITLE_ONLY_HARD_FACT_PATTERNS)
 
 
 def clean(s, n=220):
@@ -274,7 +309,14 @@ def entry_best_text(e):
 
 
 # ---- 板块/赛道分类（aibot 等无赛道标注的源用）----
-FUND_KW = ["融资", "融了", "估值", "领投", "跟投", "轮", "获投", "IPO", "天使", "种子轮"]
+FUND_PATTERNS = [
+    r"(完成|宣布|获得|获|拿到).{0,24}(融资|投资|募资)",
+    r"(融资|募资).{0,24}(完成|宣布|获得|获|领投|跟投|投资方|资金)",
+    r"(领投|跟投|本轮融资|本轮股东|投后估值|获投)",
+    r"(天使轮|种子轮|pre-[a-z]|[abcde]\+?轮)",
+    r"(ipo|上市|招股|挂牌|发售|募资)",
+    r"(funding round|seed round|series [a-z]|raised|raises|valuation)",
+]
 ENT_KW = {
     "短剧": "短剧/漫剧", "漫剧": "短剧/漫剧",
     "网文": "小说·网文", "小说": "小说·网文",
@@ -283,9 +325,15 @@ ENT_KW = {
 }
 
 
+def is_funding_event(text):
+    """只把明确融资/IPO/上市事件归入全球融资，避免 VC 观点或“新一轮”误入。"""
+    t = (text or "").lower()
+    return any(re.search(p, t, flags=re.I) for p in FUND_PATTERNS)
+
+
 def classify(text):
     t = text.lower()
-    is_fund = any(k.lower() in t for k in FUND_KW)
+    is_fund = is_funding_event(t)
     ent_track = None
     for k, v in ENT_KW.items():
         if k.lower() in t:
@@ -334,6 +382,77 @@ def _download_html(url):
         return urllib.request.urlopen(req, timeout=15).read().decode("utf-8", "ignore")
     except Exception:
         return ""
+
+
+_DATETIME_RE = re.compile(
+    r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?"
+)
+
+
+def _parse_datetime_utc(value, assume_bj=False):
+    """把页面里的发布时间转成 naive UTC datetime；白鲸可见时间按北京时间处理。"""
+    raw = _html.unescape(str(value or "")).strip()
+    if not raw:
+        return None
+    raw = raw.replace("Z", "+00:00")
+    if re.fullmatch(r"\d{13}", raw):
+        return dt.datetime.utcfromtimestamp(int(raw) / 1000)
+    if re.fullmatch(r"\d{10}", raw):
+        return dt.datetime.utcfromtimestamp(int(raw))
+    try:
+        parsed = dt.datetime.fromisoformat(raw)
+    except Exception:
+        m = _DATETIME_RE.search(raw)
+        if not m:
+            return None
+        y, mo, d, h, mi, sec = m.groups()
+        parsed = dt.datetime(int(y), int(mo), int(d), int(h), int(mi), int(sec or 0))
+    if parsed.tzinfo:
+        return parsed.astimezone(dt.timezone.utc).replace(tzinfo=None)
+    if assume_bj:
+        return parsed - dt.timedelta(hours=8)
+    return parsed
+
+
+def _html_attrs(tag):
+    attrs = {}
+    for k, _, v in re.findall(r'([a-zA-Z_:.-]+)\s*=\s*(["\'])(.*?)\2', tag, re.S):
+        attrs[k.lower()] = _html.unescape(v)
+    return attrs
+
+
+def extract_published_utc_from_html(html):
+    """从文章页提取发布时间；先读结构化 meta，再读白鲸等页面的 <time>。"""
+    if not html:
+        return None
+    meta_keys = {
+        "article:published_time", "og:published_time", "datepublished", "pubdate",
+        "publishdate", "publish_date", "baidu_ts", "date", "dc.date",
+        "dc.date.issued", "weibo:article:create_at",
+    }
+    for tag in re.findall(r"<meta\b[^>]*>", html, re.I | re.S):
+        attrs = _html_attrs(tag)
+        key = (attrs.get("property") or attrs.get("name") or attrs.get("itemprop") or "").lower()
+        if key in meta_keys and attrs.get("content"):
+            published = _parse_datetime_utc(attrs["content"], assume_bj=False)
+            if published:
+                return published
+    # 白鲸文章页会把发布时间放在 <time class="timeago">2026-06-12 17:49</time>。
+    for raw in re.findall(r"<time\b[^>]*>(.*?)</time>", html, re.I | re.S):
+        text = clean(raw, 80)
+        published = _parse_datetime_utc(text, assume_bj=True)
+        if published:
+            return published
+    # Next.js/WordPress 文章页常有 date_gmt；只用明确发布时间字段，避免误取推荐文章日期。
+    for raw in re.findall(r'"date_gmt"\s*:\s*"([^"]+)"', html, re.I):
+        published = _parse_datetime_utc(raw, assume_bj=False)
+        if published:
+            return published
+    return None
+
+
+def bj_time_label(utc_dt):
+    return (utc_dt + dt.timedelta(hours=8)).strftime("%Y-%m-%d %H:%M")
 
 
 # 过滤掉 logo/头像/图标/二维码/广告/占位图等非内容图
@@ -406,13 +525,20 @@ def _text_from_html(html):
     return " ".join(out)
 
 
+def fetch_article_full(url):
+    """取文章页 → 返回 (正文文本, 候选图URL列表, 发布时间UTC)。"""
+    h = _download_html(url)
+    if not h:
+        return "", [], None
+    return (_text_from_html(h), extract_images_from_html(h, base_url=url),
+            extract_published_utc_from_html(h))
+
+
 def fetch_article(url):
     """取文章页 → 返回 (正文文本, 候选图URL列表)。
     白鲸正文在静态 <p>；36氪出海正文在 __NEXT_DATA__；图片同页一并抽取。"""
-    h = _download_html(url)
-    if not h:
-        return "", []
-    return _text_from_html(h), extract_images_from_html(h, base_url=url)
+    body, imgs, _ = fetch_article_full(url)
+    return body, imgs
 
 
 def extract_article(url):
@@ -447,7 +573,7 @@ def main():
     ap.add_argument("--hours", type=int, default=None, help="覆盖时间窗为近N小时（测试用）")
     ap.add_argument("--date", default=None, help="指定目标日期 YYYYMMDD，按北京时间前一日16:00—当日16:00抓取（历史测试用）")
     ap.add_argument("--include-undated", action="store_true",
-                    help="配合 --date 使用时也纳入无时间戳列表页；默认跳过，避免历史测试混入当前列表页")
+                    help="配合 --date 使用时也纳入正文页仍取不到时间的列表页条目；默认跳过，避免历史测试混入当前列表页")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
     if args.hours and args.date:
@@ -485,7 +611,7 @@ def main():
     grouped = defaultdict(lambda: defaultdict(list))   # board -> track -> [items]
     wechat_pending, api_pending, errors = [], [], []
     seen_links, seen_sigs = set(), []
-    undated = skipped_recent = skipped_undated_seen = 0
+    undated = skipped_recent = skipped_undated_seen = skipped_unverified_listpage = 0
 
     def add(it, board=None, track=None):
         """统一入口：跨日去重 + 当前运行去重（链接 + 标题近重复）后入库。"""
@@ -532,24 +658,32 @@ def main():
             continue
 
         if typ == "listpage":
-            if args.date and not args.include_undated:
-                errors.append(f"{name}: 历史日期模式跳过无时间戳列表页（{src['url']}）")
-                continue
             try:
                 items = parse_listpage(src["url"], src.get("pages", ["/"]),
                                        src.get("link_pattern", r"/[0-9a-f]{6,}"), name)
                 fetched = 0
                 body_limit = src.get("body_limit", 12)
-                for it in items:           # 列表页无时间戳：保留并标注，需人工核对时效
+                for it in items:
                     if not hit_keywords(it["title"], include, exclude, protect):
                         continue
-                    it["undated"] = True
-                    # 取正文+候选图：白鲸正文在静态<p>、36氪出海在__NEXT_DATA__，图同页抽
-                    if src.get("fetch_body") and fetched < body_limit:
-                        body, imgs = fetch_article(it["link"])
-                        if body:
-                            it["summary"] = body[:600]
-                            fetched += 1
+                    body, imgs, published = "", [], None
+                    # 列表页本身常无时间；进正文页取全文、候选图和发布时间，再做窗口过滤。
+                    if src.get("fetch_body"):
+                        body, imgs, published = fetch_article_full(it["link"])
+                    if published:
+                        if not (start_utc <= published <= end_utc):
+                            continue
+                        it["published_utc"] = published.isoformat(timespec="seconds")
+                        it["published_bj"] = bj_time_label(published)
+                        it["undated"] = False
+                    else:
+                        if not args.include_undated:
+                            skipped_unverified_listpage += 1
+                            continue
+                        it["undated"] = True
+                    if body and fetched < body_limit:
+                        it["summary"] = body[:600]
+                        fetched += 1
                         if imgs:
                             it["images"] = imgs
                     add(it)
@@ -583,7 +717,14 @@ def main():
                     continue
                 if args.date and w is None and not args.include_undated:
                     continue
-                if not hit_keywords(title + " " + summ, include, exclude, protect):
+                text_for_filter = title + " " + summ
+                if not hit_keywords(text_for_filter, include, exclude, protect):
+                    continue
+                if is_personal_lifestyle_noise(text_for_filter):
+                    continue
+                if is_low_info_title_only(title, summ):
+                    continue
+                if board == "全球融资" and not src.get("autoclassify") and not is_funding_event(text_for_filter):
                     continue
                 it = {"title": title, "summary": summ, "link": link, "src": name,
                       "undated": w is None}
@@ -617,6 +758,8 @@ def main():
             for it in top:
                 total_pick += 1
                 flag = " ⏱无时间戳" if it.get("undated") else ""
+                if it.get("published_bj"):
+                    flag += f"（发布 {it['published_bj']}）"
                 out_lines.append(f"- ⭐**{it['title']}**（score {it['score']}）｜{it['src']}{flag}")
                 if it.get("summary"):
                     out_lines.append(f"  - {it['summary']}")
@@ -624,7 +767,10 @@ def main():
                     out_lines.append(f"  - 候选图: " + " | ".join(it["images"]))
                 out_lines.append(f"  - {it['link']}")
             for it in rest:
-                out_lines.append(f"- 备选：{it['title']}｜{it['src']} — {it['link']}")
+                flag = " ⏱无时间戳" if it.get("undated") else ""
+                if it.get("published_bj"):
+                    flag += f"（发布 {it['published_bj']}）"
+                out_lines.append(f"- 备选：{it['title']}｜{it['src']}{flag} — {it['link']}")
             out_lines.append("")
 
     # ---- 抬头 + 组装 ----
@@ -635,7 +781,8 @@ def main():
         "",
         f"**时间范围：{window_label}**",
         f"**精选 {total_pick} 条（每赛道Top{per_track_top}，建议成稿≤{total_cap}条）；"
-        f"已去重（链接+跨源近重复）；标 ⏱ 的为列表页无时间戳、需人工核对是否落在窗口内。**",
+        f"已去重（链接+跨源近重复）；列表页已进正文页解析发布时间并按窗口过滤，"
+        f"默认跳过仍无时间戳条目。**",
         f"**跨日回溯：已读取前 {HISTORY_LOOKBACK_DAYS} 天链接，跳过历史重复 {skipped_recent} 条；"
         f"无时间戳链接仅首次出现保留，跳过历史无时间戳 {skipped_undated_seen} 条。**",
         "",
@@ -660,6 +807,11 @@ def main():
         if recent_sources:
             lines.append("- 回溯文件：" + "、".join(os.path.basename(p) for p in recent_sources))
         lines.append("")
+    if skipped_unverified_listpage:
+        lines.append("## 列表页时间过滤")
+        lines.append(f"- 正文页仍未解析到发布时间、默认跳过：{skipped_unverified_listpage} 条")
+        lines.append("- 如需人工排查，可临时加 `--include-undated` 生成调试草稿。")
+        lines.append("")
     if errors:
         lines.append("## 抓取告警")
         lines += [f"- {e}" for e in errors]
@@ -673,7 +825,8 @@ def main():
     print(f"✅ 草稿已生成：{out}")
     print(f"   时间窗：{window_label}")
     print(f"   精选 {total_pick} 条 / 公众号待补 {len(wechat_pending)} 源 / "
-          f"告警 {len(errors)} 条 / 无时间戳 {undated} 条")
+          f"告警 {len(errors)} 条 / 无时间戳 {undated} 条 / "
+          f"列表页无发布时间跳过 {skipped_unverified_listpage} 条")
     print(f"   跨日去重跳过 {skipped_recent} 条 / 历史无时间戳跳过 {skipped_undated_seen} 条")
 
 
