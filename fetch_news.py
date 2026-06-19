@@ -573,7 +573,7 @@ def main():
     ap.add_argument("--hours", type=int, default=None, help="覆盖时间窗为近N小时（测试用）")
     ap.add_argument("--date", default=None, help="指定目标日期 YYYYMMDD，按北京时间前一日16:00—当日16:00抓取（历史测试用）")
     ap.add_argument("--include-undated", action="store_true",
-                    help="配合 --date 使用时也纳入正文页仍取不到时间的列表页条目；默认跳过，避免历史测试混入当前列表页")
+                    help="把正文页仍取不到时间的列表页条目临时放回候选区；默认仅保留在排查区，避免旧文混入正式候选")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
     if args.hours and args.date:
@@ -612,6 +612,7 @@ def main():
     wechat_pending, api_pending, errors = [], [], []
     seen_links, seen_sigs = set(), []
     undated = skipped_recent = skipped_undated_seen = skipped_unverified_listpage = 0
+    unverified_listpage_items = []
 
     def add(it, board=None, track=None):
         """统一入口：跨日去重 + 当前运行去重（链接 + 标题近重复）后入库。"""
@@ -677,8 +678,15 @@ def main():
                         it["published_bj"] = bj_time_label(published)
                         it["undated"] = False
                     else:
+                        skipped_unverified_listpage += 1
+                        if len(unverified_listpage_items) < 30:
+                            unverified_listpage_items.append({
+                                "title": it.get("title", ""),
+                                "src": it.get("src", name),
+                                "link": it.get("link", ""),
+                                "summary": body[:180] if body else "",
+                            })
                         if not args.include_undated:
-                            skipped_unverified_listpage += 1
                             continue
                         it["undated"] = True
                     if body and fetched < body_limit:
@@ -782,7 +790,7 @@ def main():
         f"**时间范围：{window_label}**",
         f"**精选 {total_pick} 条（每赛道Top{per_track_top}，建议成稿≤{total_cap}条）；"
         f"已去重（链接+跨源近重复）；列表页已进正文页解析发布时间并按窗口过滤，"
-        f"默认跳过仍无时间戳条目。**",
+        f"仍无时间戳的列表页条目默认不进正式候选，保留在排查区。**",
         f"**跨日回溯：已读取前 {HISTORY_LOOKBACK_DAYS} 天链接，跳过历史重复 {skipped_recent} 条；"
         f"无时间戳链接仅首次出现保留，跳过历史无时间戳 {skipped_undated_seen} 条。**",
         "",
@@ -808,9 +816,22 @@ def main():
             lines.append("- 回溯文件：" + "、".join(os.path.basename(p) for p in recent_sources))
         lines.append("")
     if skipped_unverified_listpage:
-        lines.append("## 列表页时间过滤")
-        lines.append(f"- 正文页仍未解析到发布时间、默认跳过：{skipped_unverified_listpage} 条")
-        lines.append("- 如需人工排查，可临时加 `--include-undated` 生成调试草稿。")
+        lines.append("## 列表页无时间戳排查（未进入正式候选）")
+        if args.include_undated:
+            lines.append(f"- 正文页仍未解析到发布时间、已按调试参数放回上方候选区：{skipped_unverified_listpage} 条")
+        else:
+            lines.append(f"- 正文页仍未解析到发布时间、未进入上方精选/备选：{skipped_unverified_listpage} 条")
+        lines.append("- 这些条目可能是源站缺发布时间、解析失败或旧文；正式成稿前如判断重要，可人工打开链接核验发布时间。")
+        if args.include_undated:
+            lines.append("- 本次已使用 `--include-undated`，所以上方候选区也会出现带 `⏱无时间戳` 的调试条目。")
+        else:
+            lines.append("- 如需把这些条目临时放回候选区，可用 `--include-undated` 生成调试草稿。")
+        for it in unverified_listpage_items:
+            lines.append(f"- {it['title']}｜{it['src']} — {it['link']}")
+            if it.get("summary"):
+                lines.append(f"  - 正文摘录：{it['summary']}")
+        if skipped_unverified_listpage > len(unverified_listpage_items):
+            lines.append(f"- 其余 {skipped_unverified_listpage - len(unverified_listpage_items)} 条已省略。")
         lines.append("")
     if errors:
         lines.append("## 抓取告警")
@@ -826,7 +847,7 @@ def main():
     print(f"   时间窗：{window_label}")
     print(f"   精选 {total_pick} 条 / 公众号待补 {len(wechat_pending)} 源 / "
           f"告警 {len(errors)} 条 / 无时间戳 {undated} 条 / "
-          f"列表页无发布时间跳过 {skipped_unverified_listpage} 条")
+          f"列表页无发布时间 {skipped_unverified_listpage} 条")
     print(f"   跨日去重跳过 {skipped_recent} 条 / 历史无时间戳跳过 {skipped_undated_seen} 条")
 
 
